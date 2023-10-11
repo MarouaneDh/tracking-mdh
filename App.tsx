@@ -1,13 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import {
-  FlatList,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { AppState, FlatList, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import Geolocation from '@react-native-community/geolocation';
-import BackgroundTimer from 'react-native-background-timer';
+import BackgroundFetch from 'react-native-background-fetch';
 
 interface LocationItem {
   latitude: number;
@@ -26,36 +20,62 @@ function App(): JSX.Element {
     return hours + ':' + minutes + ':' + seconds;
   };
 
-  const makeLocation = useCallback(() => {
-    Geolocation.getCurrentPosition(
-      position => {
-        const { latitude, longitude } = position.coords;
-        const time = getCurrentTime();
-        setLocationArray(prevState => [...prevState, { latitude, longitude, time }]);
-      },
-      error => {
-        console.log(error);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 2000000000,
-        maximumAge: 1000,
-      }
-    );
+  const handleLocationUpdate = useCallback((position: any) => {
+    const { latitude, longitude } = position.coords;
+    const time = getCurrentTime();
+    setLocationArray((prevState) => [...prevState, { latitude, longitude, time }]);
   }, [setLocationArray]);
 
   useEffect(() => {
-    const intervalId = BackgroundTimer.setInterval(() => {
-      makeLocation();
-    }, 10000); // 10 seconds
+    const handleAppStateChange = (nextAppState: any) => {
+      if (nextAppState === 'active') {
+        // App is in the foreground
+        console.log('App is in the foreground');
+        Geolocation.getCurrentPosition(handleLocationUpdate);
+      } else if (nextAppState === 'background') {
+        // App is in the background
+        console.log('App is in the background');
+      }
+    };
 
-    // Immediately invoke `makeLocation` to get the initial location
-    makeLocation();
+    // Add the AppState change listener
+    AppState.addEventListener('change', handleAppStateChange);
+
+    // Register a background task
+    BackgroundFetch.configure(
+      {
+        minimumFetchInterval: 15, // Fetch every 15 minutes (adjust as needed)
+      },
+      async (taskId) => {
+        // Fetch the location in the background
+        Geolocation.getCurrentPosition(
+          (position) => {
+            handleLocationUpdate(position);
+          },
+          (error) => {
+            console.log(error);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 2000000000,
+            maximumAge: 1000,
+          }
+        );
+
+        // Finish the background task
+        BackgroundFetch.finish(taskId);
+      }
+    );
+
+    // Start the background task
+    BackgroundFetch.start();
 
     return () => {
-      BackgroundTimer.clearInterval(intervalId);
+      // Remove the AppState change listener and stop the background task when the component unmounts
+      AppState.removeEventListener('change', handleAppStateChange);
+      BackgroundFetch.stop();
     };
-  }, [makeLocation]);
+  }, [handleLocationUpdate]);
 
   const keyExtractor = (item: LocationItem, index: number) => index.toString();
 
