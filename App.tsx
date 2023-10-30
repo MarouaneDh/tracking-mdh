@@ -1,7 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { AppState, FlatList, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {FlatList, SafeAreaView, StyleSheet, Text, View} from 'react-native';
 import Geolocation from '@react-native-community/geolocation';
-import BackgroundFetch from 'react-native-background-fetch';
 
 interface LocationItem {
   latitude: number;
@@ -12,6 +11,25 @@ interface LocationItem {
 function App(): JSX.Element {
   const [locationArray, setLocationArray] = useState<LocationItem[]>([]);
 
+  const keyExtractor = (item: LocationItem, index: number) => index.toString();
+
+  const renderItem = ({item, index}: {item: LocationItem; index: number}) => {
+    return (
+      <View style={styles.locationContainer}>
+        <Text style={{fontWeight: 'bold'}}>Location #{index + 1}:</Text>
+        <Text>
+          Time : <Text style={{fontWeight: 'bold'}}>{item.time}</Text>
+        </Text>
+        <Text>
+          Latitude : <Text style={{fontWeight: 'bold'}}>{item.latitude}</Text>
+        </Text>
+        <Text>
+          Longitude : <Text style={{fontWeight: 'bold'}}>{item.longitude}</Text>
+        </Text>
+      </View>
+    );
+  };
+
   const getCurrentTime = () => {
     const today = new Date();
     const hours = (today.getHours() < 10 ? '0' : '') + today.getHours();
@@ -20,75 +38,50 @@ function App(): JSX.Element {
     return hours + ':' + minutes + ':' + seconds;
   };
 
-  const handleLocationUpdate = useCallback((position: any) => {
-    const { latitude, longitude } = position.coords;
-    const time = getCurrentTime();
-    setLocationArray((prevState) => [...prevState, { latitude, longitude, time }]);
-  }, [setLocationArray]);
-
   useEffect(() => {
-    const handleAppStateChange = (nextAppState: any) => {
-      if (nextAppState === 'active') {
-        // App is in the foreground
-        console.log('App is in the foreground');
-        Geolocation.getCurrentPosition(handleLocationUpdate);
-      } else if (nextAppState === 'background') {
-        // App is in the background
-        console.log('App is in the background');
-      }
+    // Request background location updates
+    Geolocation.setRNConfiguration({
+      skipPermissionRequests: false,
+      authorizationLevel: 'always',
+      enableBackgroundLocationUpdates: true,
+    });
+
+    const locationUpdateInterval = 10000; // 10 seconds in milliseconds
+
+    const updateLocation = () => {
+      Geolocation.getCurrentPosition(
+        position => {
+          const {latitude, longitude} = position.coords;
+          const currentTime = getCurrentTime();
+
+          console.log({latitude, longitude, time: currentTime});
+
+          // Add the location data to the array
+          setLocationArray(prevArray => [
+            ...prevArray,
+            {latitude, longitude, time: currentTime},
+          ]);
+        },
+        error => {
+          console.error('Error getting location:', error);
+        },
+        {enableHighAccuracy: true, timeout: 20000, maximumAge: 1000},
+      );
     };
 
-    // Add the AppState change listener
-    AppState.addEventListener('change', handleAppStateChange);
+    // Initial location update
+    updateLocation();
 
-    // Register a background task
-    BackgroundFetch.configure(
-      {
-        minimumFetchInterval: 15, // Fetch every 15 minutes (adjust as needed)
-      },
-      async (taskId) => {
-        // Fetch the location in the background
-        Geolocation.getCurrentPosition(
-          (position) => {
-            handleLocationUpdate(position);
-          },
-          (error) => {
-            console.log(error);
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 2000000000,
-            maximumAge: 1000,
-          }
-        );
-
-        // Finish the background task
-        BackgroundFetch.finish(taskId);
-      }
+    // Set up interval for subsequent location updates
+    const locationUpdateTimer = setInterval(
+      updateLocation,
+      locationUpdateInterval,
     );
-
-    // Start the background task
-    BackgroundFetch.start();
 
     return () => {
-      // Remove the AppState change listener and stop the background task when the component unmounts
-      AppState.removeEventListener('change', handleAppStateChange);
-      BackgroundFetch.stop();
+      clearInterval(locationUpdateTimer); // Clean up the interval when the component unmounts
     };
-  }, [handleLocationUpdate]);
-
-  const keyExtractor = (item: LocationItem, index: number) => index.toString();
-
-  const renderItem = ({ item, index }: { item: LocationItem; index: number }) => {
-    return (
-      <View style={styles.locationContainer}>
-        <Text style={{ fontWeight: 'bold' }}>Location #{index + 1}:</Text>
-        <Text>Time : <Text style={{ fontWeight: 'bold' }}>{item.time}</Text></Text>
-        <Text>Latitude : <Text style={{ fontWeight: 'bold' }}>{item.latitude}</Text></Text>
-        <Text>Longitude : <Text style={{ fontWeight: 'bold' }}>{item.longitude}</Text></Text>
-      </View>
-    );
-  };
+  }, []);
 
   return (
     <SafeAreaView>
